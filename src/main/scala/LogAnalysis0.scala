@@ -1,4 +1,4 @@
-import org.apache.spark.mllib.linalg.DenseVector
+import org.apache.spark.mllib.linalg.{Vectors, DenseVector}
 import org.apache.spark.rdd.RDD
 import scala.reflect.io.File
 import scala.util.parsing.combinator.RegexParsers
@@ -89,10 +89,24 @@ import org.apache.spark.SparkContext
 import org.apache.spark.SparkContext._
 import org.apache.spark.SparkConf
 
+object DataPreparation extends java.io.Serializable {
+  def toLabelled(point: (String, List[Object])) : LabeledPoint = {
+    val len = point._2.length
+    val features = point._2.slice(2, len).asInstanceOf[List[Double]].toArray
+    return LabeledPoint(features(0), Vectors.dense(features.slice(1,features.length)))
+  }
+}
+
 object StatsAnalysis extends java.io.Serializable{
   def getOwners (stats: RDD[LogLine with Product with Serializable]) : RDD[(String, List[String])] = { //(app, [user])
     stats.map({
       case Status(app, user, _) => (app, List(user)) //TODO: should I deal with no-status?
+    })
+  }
+  def getStatus(stats: RDD[LogLine with Product with Serializable]) : RDD[(String, Double)] = { //(app, success)
+    stats.map({
+      case Status(app, _, "SUCCEEDED") => (app, 1.0)
+      case Status(app, _, _) => (app, 0.0)
     })
   }
   def getSuccessRates(stats: RDD[LogLine with Product with Serializable]): RDD[(String, Double)] = { //(user, SuccessRate)
@@ -147,19 +161,24 @@ object LogAnalysis extends java.io.Serializable {
       case _ => false
     }).cache()
 
-    val owners = StatsAnalysis.getOwners(stats)
-    for(i <- owners.collect()) yield {println(i)}
+    val owners = StatsAnalysis.getOwners(stats).asInstanceOf[RDD[(String, List[Object])]]
 
-    val rates = StatsAnalysis.getSuccessRates(stats)
-    for(i <- rates.collect()) yield {println(i)}
+    val results = StatsAnalysis.getStatus(stats).asInstanceOf[RDD[(String, Object)]]
 
-    val debugData = sc.parallelize(List(("application_1425682538854_0454", "blabla"))) : RDD[(String, Object)]
+    val rates = StatsAnalysis.getSuccessRates(stats).asInstanceOf[RDD[(String, Object)]]
+
+    val data = StatsAnalysis.joinWithUser(StatsAnalysis.joinWithApp(owners, results), rates)
+
+    for (i <- data.collect()) yield {println(i)}
+
+    /*val debugData = sc.parallelize(List(("application_1425682538854_0454", "blabla"))) : RDD[(String, Object)]
     val myJoin = StatsAnalysis.joinWithApp(owners.asInstanceOf[RDD[(String, List[Object])]], debugData)
 
-    for(i <- myJoin.collect()) yield {println(i)}
+    for(i <- myJoin.collect()) yield {println(i)}*/
 
-    val joinedRates = StatsAnalysis.joinWithUser(owners.asInstanceOf[RDD[(String, List[Object])]], rates.asInstanceOf[RDD[(String, Object)]])
-    for(i <- joinedRates.collect()) yield {println(i)}
+    /*val joinedRates = StatsAnalysis.joinWithUser(owners.asInstanceOf[RDD[(String, List[Object])]], rates.asInstanceOf[RDD[(String, Object)]])
+    for(i <- joinedRates.collect()) yield {println(i)}*/
+
     /*
     for(i <- successRate.collect()) yield {println(i)}
 
